@@ -16,6 +16,19 @@ def register_minigrid_envs():
         entry_point="minigrid.envs:BlockedUnlockPickupEnv",
     )
 
+    # LavaCliffs
+    # ----------------------------------------
+    register(
+        id="MiniGrid-LavaCliffsS7N1-v0",
+        entry_point="minigrid.envs:CliffEnv",
+        kwargs={"size": 7, "n_obstacles": 1, "max_steps": 100},
+    )
+    register(
+        id="MiniGrid-LavaCliffsS9N1-v0",
+        entry_point="minigrid.envs:CliffEnv",
+        kwargs={"size": 9, "n_obstacles": 1, "max_steps": 100},
+    )
+
     # LavaCrossing
     # ----------------------------------------
     register(
