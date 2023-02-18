@@ -120,15 +120,15 @@ class CliffEnv(MiniGridEnv):
 
         # Allow only 3 actions permitted: left, right, forward
         self.action_space = Discrete(self.actions.forward + 1)
-        self.reward_range = (-1, 1)
+        self.reward_range = (0, 1)
 
     @staticmethod
     def _gen_mission_lava():
-        return "avoid the lava and get to the green goal square"
+        return "avoid the lava and moving obstacles and get to the green goal square"
 
     @staticmethod
     def _gen_mission():
-        return "find the opening and get to the green goal square"
+        return "avoid the moving obstacles and get to the green goal square"
 
     def _gen_grid(self, width, height):
         assert width % 2 == 1 and height % 2 == 1  # odd size
@@ -156,11 +156,6 @@ class CliffEnv(MiniGridEnv):
             self.obstacles.append(Ball())
             self.place_obj(self.obstacles[i_obst], max_tries=100)
 
-        self.mission = (
-            "avoid the lava and get to the green goal square"
-            if self.obstacle_type == Lava
-            else "find the opening and get to the green goal square"
-        )
 
     def step(self, action):
         # Invalid action
@@ -189,7 +184,7 @@ class CliffEnv(MiniGridEnv):
 
         # If the agent tried to walk over an obstacle or wall
         if action == self.actions.forward and not_clear:
-            reward = -1
+            # reward = -1
             terminated = True
             return obs, reward, terminated, truncated, info
 
