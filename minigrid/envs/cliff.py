@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from enum import Enum
 import itertools as itt
 from operator import add
 
@@ -11,6 +12,9 @@ from minigrid.core.world_object import Goal, Lava, Ball
 from minigrid.minigrid_env import MiniGridEnv
 from gymnasium.spaces import Discrete
 
+class MAP_TYPE(Enum):
+    CROSS = 'CROSS',
+    SLOT = 'SLOT'
 
 class CliffEnv(MiniGridEnv):
 
@@ -92,9 +96,11 @@ class CliffEnv(MiniGridEnv):
         obstacle_type=Lava,
         n_obstacles=1,
         max_steps: int | None = None,
+        map_type: MAP_TYPE = MAP_TYPE.CROSS,
         **kwargs,
     ):
         self.obstacle_type = obstacle_type
+        self.map_type = map_type
 
         # Reduce obstacles if there are too many
         if n_obstacles <= size / 2 + 1:
@@ -144,11 +150,20 @@ class CliffEnv(MiniGridEnv):
         self.agent_dir = 0
 
         # Place a goal square in the bottom-right corner
-        self.put_obj(Goal(), width - 2, height - 2)
+        # self.put_obj(Goal(), width - 2, height - 2)
 
         # place lava walls
-        self.grid.vert_wall(1,2, height-2 - 2, Lava)
-        self.grid.vert_wall(width-2,2, height-2 - 2, Lava)
+        if self.map_type == MAP_TYPE.CROSS:
+            self.grid.vert_wall(width//2, 2, height-4, Lava)
+            self.grid.horz_wall(2, height//2, width - 4, Lava)
+        elif self.map_type == MAP_TYPE.SLOT:
+            if width >= 7 and height >= 7:
+                self.grid.horz_wall(2, 2, width-4, Lava)  # top wall
+                self.grid.vert_wall(2, 2, height-4, Lava)  # left
+                self.grid.vert_wall(width-3, 2, height-4, Lava)  # right
+                self.grid.horz_wall(2, height-3, (width-4-1)//2, Lava)
+                self.grid.horz_wall(2+(width-4-1)//2 + 1, height-3, (width-4-1)//2, Lava)  # bottom w/ slot
+                
 
         # Place obstacles
         self.obstacles = []
@@ -185,7 +200,7 @@ class CliffEnv(MiniGridEnv):
         # If the agent tried to walk over an obstacle or wall
         if action == self.actions.forward and not_clear:
             # reward = -1
-            terminated = True
+            # terminated = True
             return obs, reward, terminated, truncated, info
 
         return obs, reward, terminated, truncated, info
