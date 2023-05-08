@@ -14,7 +14,8 @@ from gymnasium.spaces import Discrete
 
 class MAP_TYPE(Enum):
     CROSS = 'CROSS',
-    SLOT = 'SLOT'
+    SLOT = 'SLOT',
+    SPIRAL = 'SPIRAL'
 
 class CliffEnv(MiniGridEnv):
 
@@ -163,6 +164,19 @@ class CliffEnv(MiniGridEnv):
                 self.grid.vert_wall(width-3, 2, height-4, Lava)  # right
                 self.grid.horz_wall(2, height-3, (width-4-1)//2, Lava)
                 self.grid.horz_wall(2+(width-4-1)//2 + 1, height-3, (width-4-1)//2, Lava)  # bottom w/ slot
+        elif self.map_type == MAP_TYPE.SPIRAL:
+            l_idx, t_idx = 2, 0  # left, top
+            r_idx, b_idx = width - 3, height - 3  # right, bottom
+            while r_idx - l_idx > 1 and b_idx - t_idx > 1:
+                self.grid.vert_wall(l_idx, t_idx, b_idx-t_idx+1, Lava)  # left
+                t_idx += 2
+                self.grid.horz_wall(l_idx, b_idx, r_idx-l_idx+1, Lava)  # bottom
+                l_idx += 2
+                self.grid.vert_wall(r_idx, t_idx, b_idx-t_idx+1, Lava)  # right
+                b_idx -= 2
+                self.grid.horz_wall(l_idx, t_idx, r_idx-l_idx+1, Lava)  # top
+                r_idx -= 2
+            self.grid.vert_wall(2, 0, 1)  # replace wall from first vertical lava placement
                 
 
         # Place obstacles
