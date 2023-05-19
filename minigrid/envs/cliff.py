@@ -167,7 +167,7 @@ class CliffEnv(MiniGridEnv):
         elif self.map_type == MAP_TYPE.SPIRAL:
             l_idx, t_idx = 2, 0  # left, top
             r_idx, b_idx = width - 3, height - 3  # right, bottom
-            while r_idx - l_idx > 1 and b_idx - t_idx > 1:
+            while r_idx - l_idx >= 0 and b_idx - t_idx >= 0:
                 self.grid.vert_wall(l_idx, t_idx, b_idx-t_idx+1, Lava)  # left
                 t_idx += 2
                 self.grid.horz_wall(l_idx, b_idx, r_idx-l_idx+1, Lava)  # bottom
