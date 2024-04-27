@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 name = "minigrid"
 description = "Minimalistic gridworld reinforcement learning environments."
 readme = "README.md"
-requires-python = ">= 3.7, < 3.11"
+requires-python = ">= 3.7"
 authors = [{ name = "Farama Foundation", email = "contact@farama.org" }]
 license = { text = "MIT License" }
 keywords = ["Memory, Environment, Agent, RL, Gymnasium"]
@@ -20,13 +20,14 @@ classifiers = [
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
     'Intended Audience :: Science/Research',
     'Topic :: Scientific/Engineering :: Artificial Intelligence',
 ]
 dependencies = [
     "numpy>=1.18.0",
-    "gymnasium>=0.26",
-    "matplotlib>=3.0",
+    "gymnasium>=0.28.1",
+    "pygame>=2.4.0",
 ]
 dynamic = ["version"]
 
@@ -34,6 +35,11 @@ dynamic = ["version"]
 testing = [
     "pytest>=7.0.1",
     "pytest-mock>=3.10.0",
+    "matplotlib>=3.0"
+]
+wfc = [
+    "networkx",
+    "imageio>=2.31.1",
 ]
 
 [project.urls]
@@ -49,7 +55,7 @@ __root__ = "minigrid.__init__:register_minigrid_envs"
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["minigrid"]
+include = ["minigrid*"]
 
 # Linters and Test tools #######################################################
 
