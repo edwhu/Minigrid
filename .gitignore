@@ -2,6 +2,7 @@
 *__pycache__
 *egg-info
 trained_models
+tensorflow_datasets
 
 # PyPI
 build/*

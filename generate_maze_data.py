@@ -21,34 +21,6 @@ from multiprocessing import Process
 """
 _METADATA_FILENAME='features.json'
 
-def get_ds_paths(pattern: str) -> List[str]:
-  """Returns the paths of tfds datasets under a (set of) directories.
-
-  We assume that a sub-directory with features.json file contains the dataset
-  files.
-
-  Args:
-    pattern: Root directory to search for dataset paths or a glob that matches
-      a set of directories, e.g. /some/path or /some/path/prefix*. See
-      tf.io.gfile.glob for the supported patterns.
-
-  Returns:
-    A list of paths that contain the environment logs.
-
-  Raises:
-    ValueError if the specified pattern matches a non-directory.
-  """
-  paths = set([])
-  for root_dir in tf.io.gfile.glob(pattern):
-    if not tf.io.gfile.isdir(root_dir):
-      raise ValueError(f'{root_dir} is not a directory.')
-    print(f'root: {root_dir}')
-    for path, _, files in tf.io.gfile.walk(root_dir):
-      if _METADATA_FILENAME in files:
-        print(f'path: {path}')
-        paths.add(path)
-  return list(paths)
-
 def record_data(env, data_dir, ds_config, num_episodes, max_episodes_per_shard, worker_idx):
   def step_fn(unused_timestep, unused_action, unused_env):
     return {'timestamp_ns': time.time_ns()}
@@ -76,8 +48,8 @@ def record_data(env, data_dir, ds_config, num_episodes, max_episodes_per_shard, 
 
 def worker(worker_idx):
   generate_data_dir = os.path.join('./tensorflow_datasets/maze/', f'worker_{worker_idx}') # @param
-  num_episodes = 200 # @param
-  max_episodes_per_shard = 1000 # @param
+  num_episodes = 125 # @param
+  max_episodes_per_shard = 100 # @param
   os.makedirs(generate_data_dir, exist_ok=True)
 
   env = gym.make("MiniGrid-WFC-MazeSimple-v0")
@@ -127,6 +99,6 @@ if __name__ == "__main__":
   for i in range(num_processes):
     all_subdirs.append(os.path.join(multiple_dataset_path, f'worker_{i}'))
   ds = tfds.builder_from_directories(all_subdirs).as_dataset(split='all')
-  ds = ds.take(-1).cache().repeat(1)
+  ds = ds.take(5).cache().repeat(1)
   for i, e in enumerate(ds):
     print(i)
