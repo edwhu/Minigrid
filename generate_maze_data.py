@@ -1,104 +1,177 @@
+from __future__ import annotations
+
 import os
+import time
+from multiprocessing import Process
+
 import envlogger
-from envlogger.backends import rlds_utils
-from envlogger.backends import tfds_backend_writer
+import gymnasium as gym
 import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tfds
-import time
-from typing import List
-import gymnasium as gym
-from gymnasium.wrappers import FilterObservation 
 from dm_env_wrappers import GymnasiumWrapper
-from multiprocessing import Process
+from envlogger.backends import rlds_utils, tfds_backend_writer
+from gymnasium.wrappers import FilterObservation
+from maze_solver import MazePolicy
 
+from minigrid.wrappers import FullyObsWrapper, ReseedWrapper, RGBImgObsWrapper
 
 """
   Use envlogger to write trajectories into RLDS dataset format.
   Envlogger: https://github.com/google-deepmind/envlogger
   Some code taken from https://github.com/google-research/rlds/blob/main/rlds/examples/rlds_tfds_envlogger.ipynb
-  TODO: @Ed use a better policy than random policy. 
 """
-_METADATA_FILENAME='features.json'
 
-def record_data(env, data_dir, ds_config, num_episodes, max_episodes_per_shard, worker_idx):
-  def step_fn(unused_timestep, unused_action, unused_env):
-    return {'timestamp_ns': time.time_ns()}
+def record_data(env, data_dir, ds_config, num_steps, max_episodes_per_shard, worker_idx, epsilon, split):
+  # def step_fn(unused_timestep, unused_action, unused_env):
+  #   return {'timestamp_ns': time.time_ns()}
+
+  # def episode_fn(timestep, unused_action, unused_env):
+  #   if timestep.first:
+  #     return {'image': timestep.observation['image']}
+  #   else:
+  #     return None
+
+  log_interval = 10
 
   with envlogger.EnvLogger(
       env,
       backend = tfds_backend_writer.TFDSBackendWriter(
         data_directory=data_dir,
-        split_name='train',
+        split_name=split,
         max_episodes_per_file=max_episodes_per_shard,
         ds_config=ds_config),
-      step_fn=step_fn) as env:
-    print('Done wrapping environment with EnvironmentLogger.')
-
-    print(f'{worker_idx}: Logging a random agent for {num_episodes} episodes...')
+      ) as env:
+    print(f'{worker_idx}: Logging an ε={epsilon} agent for {num_steps} steps...')
     low = env.action_spec().minimum
     high = env.action_spec().maximum + 1
-    for i in range(num_episodes):
-      print(worker_idx, f': episode {i}')
+    policy = MazePolicy(epsilon=epsilon, low=low, high=high, seed=worker_idx)
+    step_count = 0
+    ep_count = 0
+    while step_count < num_steps:
       timestep = env.reset()
+      policy.reset(timestep.observation)
+      step_count += 1
       while not timestep.last():
-        action = np.random.randint(low=low, high=high)
+        action = policy.step(timestep.observation)
         timestep = env.step(action)
-    print(f'{worker_idx}: Done logging a random agent for {num_episodes} episodes.')
+        step_count += 1
+      ep_count += 1
+      if ep_count % log_interval == 0:
+        ending = "Terminated" if timestep.discount == 0.0 else "Timed out"
+        print(f'Worker {worker_idx}: {ending} episode {ep_count}.  {step_count} / {num_steps} steps')
+    ending = "Terminated" if timestep.discount == 0.0 else "Timed out"
+    print(f'Worker {worker_idx}: {ending} episode {ep_count}.  {step_count} / {num_steps} steps')
 
-def worker(worker_idx):
-  generate_data_dir = os.path.join('./tensorflow_datasets/maze/', f'worker_{worker_idx}') # @param
-  num_episodes = 125 # @param
-  max_episodes_per_shard = 100 # @param
-  os.makedirs(generate_data_dir, exist_ok=True)
+def worker(worker_idx, maze_seeds, epsilon, data_dir, split):
+  num_steps = 1000 
+  max_episodes_per_shard = 100 
 
-  env = gym.make("MiniGrid-WFC-MazeSimple-v0")
-  env = FilterObservation(env, ["image"])
+  os.makedirs(data_dir, exist_ok=False)
+
+  env = gym.make("MiniGrid-WFC-MazeSimple-v0", render_mode="rgb_array", tile_size=1, max_steps=100)
+  env = ReseedWrapper(env, seeds=maze_seeds)
+  # MazePolicy needs to see the full observation
+  env = FullyObsWrapper(env)
+  # Save RGB observations since RGB is easier to visualize
+  env = RGBImgObsWrapper(env, key="rgb_image",tile_size=1)
+  # Remove extraneous keys like mission.
+  gym_env = FilterObservation(env, ["image", "rgb_image", "direction"])
+
+  # convert to deepmind env.
+  env = GymnasiumWrapper(gym_env)
   print(env.observation_space)
-  env = GymnasiumWrapper(env)
   ds_config = tfds.rlds.rlds_base.DatasetConfig(
         name='maze_env',
         observation_info={
-          'image': tfds.features.Tensor(
-                     shape=(7, 7, 3),
+          'rgb_image': tfds.features.Tensor(
+                     shape=(gym_env.unwrapped.height, gym_env.unwrapped.width, 3),
                      dtype=np.uint8,
                      encoding=tfds.features.Encoding.ZLIB
-                   )
+          ),
+          'image': tfds.features.Tensor(
+                     shape=(gym_env.unwrapped.height, gym_env.unwrapped.width, 3),
+                     dtype=np.uint8,
+                     encoding=tfds.features.Encoding.ZLIB
+          ),
+          'direction':  np.uint8,
         },
         action_info=np.int64,
         reward_info=np.float64,
         discount_info=np.float64,
-        step_metadata_info={'timestamp_ns': np.int64})
+    )
 
-  record_data(env, generate_data_dir, ds_config, num_episodes, max_episodes_per_shard, worker_idx)
+  record_data(env, data_dir, ds_config, num_steps, max_episodes_per_shard, worker_idx, epsilon, split)
 
-  # recover_dataset_path = generate_data_dir # @param
-  print(worker_idx, ': Recovering dataset.')
-  builder = tfds.builder_from_directory(generate_data_dir)
+  print(f'Worker {worker_idx}: Finished, checking if last shard needs recovering.')
+  builder = tfds.builder_from_directory(data_dir)
   builder = rlds_utils.maybe_recover_last_shard(builder)
+
+_METADATA_FILENAME='features.json'
+def get_ds_paths(pattern: str):
+  """Returns the paths of tfds datasets under a (set of) directories.
+
+  We assume that a sub-directory with features.json file contains the dataset
+  files.
+
+  Args:
+    pattern: Root directory to search for dataset paths or a glob that matches
+      a set of directories, e.g. /some/path or /some/path/prefix*. See
+      tf.io.gfile.glob for the supported patterns.
+
+  Returns:
+    A list of paths that contain the environment logs.
+
+  Raises:
+    ValueError if the specified pattern matches a non-directory.
+  """
+  paths = set([])
+  for root_dir in tf.io.gfile.glob(pattern):
+    if not tf.io.gfile.isdir(root_dir):
+      raise ValueError(f'{root_dir} is not a directory.')
+    print(f'root: {root_dir}')
+    for path, _, files in tf.io.gfile.walk(root_dir):
+      if _METADATA_FILENAME in files:
+        # print(f'path: {path}')
+        paths.add(path)
+  print(f'discovered {len(paths)} folders')
+  return list(paths)
 
 if __name__ == "__main__":
   GENERATE_DATA = False
-  num_processes = 8 
+  TEST_DATALOADING = True
+  num_processes = 100
+
+  maze_range = range(0, 100)
+  maze_seeds = [i for i in maze_range]
+  split = 'train'
 
   if GENERATE_DATA:
     if num_processes == 1:
-      worker(0)
+      eps = 0
+      data_dir = os.path.join(f'./tensorflow_datasets/maze/', f'worker0_e{eps}_maze{maze_range.start}-{maze_range.stop}') # @param
+      worker(0, maze_seeds, eps, data_dir, split)
     else:
+      epsilon_ranges = []
+      for i in range(10):
+        epsilon_ranges.extend([(i+1) * 0.1] * 10)
+      assert len(epsilon_ranges) == num_processes
       processes = []
-      for i in range(num_processes):
-        p = Process(target=worker, args=(i,))
+      for worker_idx in range(num_processes):
+        eps = epsilon_ranges[worker_idx]
+        data_dir = os.path.join(f'./tensorflow_datasets/maze/', f'worker{worker_idx}_e{eps:.1f}_maze{maze_range.start}-{maze_range.stop}') # @param
+        p = Process(target=worker, args=(worker_idx, maze_seeds, eps, data_dir, split))
         p.start()
         processes.append(p)
 
       for p in processes:
         p.join()
 
-  multiple_dataset_path = os.path.join('./tensorflow_datasets/maze/')
-  all_subdirs = []
-  for i in range(num_processes):
-    all_subdirs.append(os.path.join(multiple_dataset_path, f'worker_{i}'))
-  ds = tfds.builder_from_directories(all_subdirs).as_dataset(split='all')
-  ds = ds.take(5).cache().repeat(1)
-  for i, e in enumerate(ds):
-    print(i)
+  if TEST_DATALOADING:
+    multiple_dataset_path = os.path.join('./tensorflow_datasets/maze/')
+    all_subdirs = get_ds_paths(multiple_dataset_path)
+    ds = tfds.builder_from_directories(all_subdirs).as_dataset(split='test')
+    ds = ds.take(5).cache().repeat(1)
+    for i, e in enumerate(ds):
+      print(i)
+    

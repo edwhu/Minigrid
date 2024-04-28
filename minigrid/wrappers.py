@@ -306,32 +306,33 @@ class RGBImgObsWrapper(ObservationWrapper):
         ![RGBImgObsWrapper](../figures/lavacrossing_RGBImgObsWrapper.png)
     """
 
-    def __init__(self, env, tile_size=8):
+    def __init__(self, env, key, tile_size=8):
         super().__init__(env)
 
         self.tile_size = tile_size
+        self.key = key
 
         new_image_space = spaces.Box(
             low=0,
             high=255,
             shape=(
-                self.unwrapped.width * tile_size,
                 self.unwrapped.height * tile_size,
+                self.unwrapped.width * tile_size,
                 3,
             ),
             dtype="uint8",
         )
 
         self.observation_space = spaces.Dict(
-            {**self.observation_space.spaces, "image": new_image_space}
+            {**self.observation_space.spaces, key: new_image_space} # type: ignore
         )
 
     def observation(self, obs):
         rgb_img = self.get_frame(
-            highlight=self.unwrapped.highlight, tile_size=self.tile_size
+            highlight=self.unwrapped.highlight, tile_size=self.tile_size # type: ignore
         )
 
-        return {**obs, "image": rgb_img}
+        return {**obs, self.key: rgb_img}
 
 
 class RGBImgPartialObsWrapper(ObservationWrapper):

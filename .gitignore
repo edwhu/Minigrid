@@ -3,6 +3,10 @@
 *egg-info
 trained_models
 tensorflow_datasets
+tensorflow_datasets.zip
+maze.mp4
+maze.png
+policy_*.mp4
 
 # PyPI
 build/*
