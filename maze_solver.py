@@ -9,6 +9,7 @@ import networkx as nx
 import numpy as np
 from dm_env_wrappers import GymnasiumWrapper
 from gymnasium.wrappers import FilterObservation
+from tqdm import trange
 
 from minigrid.core.actions import Actions
 from minigrid.core.constants import DIR_TO_VEC
@@ -106,30 +107,60 @@ class MazePolicy(object):
         return action
 
 def test_maze_policy():
-    env = gym.make("MiniGrid-WFC-MazeSimple-v0", render_mode="rgb_array", tile_size=16, max_steps=100)
-    env = FullyObsWrapper(env)
-    env = FilterObservation(env, ["image", "direction"])
-    env = ReseedWrapper(env, seeds=[0])
-    env = GymnasiumWrapper(env)
-    low = env.action_spec().minimum
-    high = env.action_spec().maximum + 1
+    all_maze_videos = [[] for i in range(9)]
+    num_mazes = 5
+    max_steps = 150
+
+    for policy_i in trange(1,10, desc='running different policies'):
+        env = gym.make("MiniGrid-WFC-MazeSimple-v0", render_mode="rgb_array", tile_size=16, max_steps=max_steps)
+        env = FullyObsWrapper(env)
+        env = FilterObservation(env, ["image", "direction"])
+        env = ReseedWrapper(env, seeds=[i for i in range(num_mazes)])
+        env = GymnasiumWrapper(env)
+        low = env.action_spec().minimum
+        high = env.action_spec().maximum + 1
+
+        epsilon = 0.9 - (0.1 * policy_i)
+        policy = MazePolicy(epsilon=epsilon, low=low, high=high, seed=0)
+
+        for _ in trange(num_mazes, desc='running different mazes'):
+            video = []
+            timestep = env.reset()
+            policy.reset(timestep.observation)
+            video.append(env.environment.render())
+            steps = 0
+            while not timestep.last():
+                action = policy.step(timestep.observation)
+                timestep = env.step(action)
+                video.append(env.environment.render())
+                steps += 1
+            ending = "terminated" if timestep.discount == 0.0 else "timeout"
+            print(ending, steps)
+            all_maze_videos[policy_i-1].append(np.asarray(video))
 
     video = []
-    epsilon = 0.9
-    policy = MazePolicy(epsilon=epsilon, low=low, high=high, seed=0)
+    for maze_idx in trange(num_mazes, desc='padding and gridding videos'):
+        # first get all policies for this maze.
+        policy_rollouts = [all_maze_videos[policy_idx][maze_idx] for policy_idx in range(9)]
+        max_len = max_steps + 1
+        # pad the rollouts with the last frame
+        for policy_i in range(len(policy_rollouts)):
+            last_frame = policy_rollouts[policy_i][-1]
+            pad_len = max_len - len(policy_rollouts[policy_i])
+            policy_rollouts[policy_i] = np.concatenate([policy_rollouts[policy_i], np.repeat(last_frame[np.newaxis, :], pad_len, axis=0)])
+    
+        policy_rollouts = np.array(policy_rollouts)
+        first_row = np.concatenate(policy_rollouts[:3], axis=1)
+        second_row = np.concatenate(policy_rollouts[3:6], axis=1)
+        third_row = np.concatenate(policy_rollouts[6:], axis=1)
+        grid = np.concatenate([first_row, second_row, third_row], axis=2)
+        video.append(grid)
+        
 
-    for _ in range(5):
-        timestep = env.reset()
-        policy.reset(timestep.observation)
-        video.append(env.environment.render())
-        while not timestep.last():
-            action = policy.step(timestep.observation)
-            timestep = env.step(action)
-            video.append(env.environment.render())
-        ending = "terminated" if timestep.discount == 0.0 else "timeout"
-        now = datetime.now()
-        datetime_str = now.strftime("%Y%m%d_%H%M%S")
-        imageio.mimsave(f"policy_{epsilon}_{ending}_{datetime_str}.mp4", video, fps=20)
+    video = np.concatenate(video, axis=0)
+    now = datetime.now()
+    datetime_str = now.strftime("%Y%m%d_%H%M%S")
+    imageio.mimsave(f"stacked_mazes_{datetime_str}.mp4", video, fps=20) # type: ignore
 
 def test_path_to_actions():
     env = gym.make("MiniGrid-WFC-MazeSimple-v0", render_mode="rgb_array", tile_size=16)
