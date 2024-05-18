@@ -138,18 +138,19 @@ def get_ds_paths(pattern: str):
   return list(paths)
 
 if __name__ == "__main__":
-  GENERATE_DATA = False
-  TEST_DATALOADING = True
+  GENERATE_DATA = True
+  TEST_DATALOADING = False
   num_processes = 100
 
-  maze_range = range(0, 100)
+  maze_range = range(100, 200)
   maze_seeds = [i for i in maze_range]
-  split = 'train'
+  root_data_dir = './tensorflow_datasets/maze/'
+  split = 'test'
 
   if GENERATE_DATA:
     if num_processes == 1:
       eps = 0
-      data_dir = os.path.join(f'./tensorflow_datasets/maze/', f'worker0_e{eps}_maze{maze_range.start}-{maze_range.stop}') # @param
+      data_dir = os.path.join(root_data_dir, f'worker0_e{eps}_maze{maze_range.start}-{maze_range.stop}') # @param
       worker(0, maze_seeds, eps, data_dir, split)
     else:
       epsilon_ranges = []
@@ -159,7 +160,7 @@ if __name__ == "__main__":
       processes = []
       for worker_idx in range(num_processes):
         eps = epsilon_ranges[worker_idx]
-        data_dir = os.path.join(f'./tensorflow_datasets/maze/', f'worker{worker_idx}_e{eps:.1f}_maze{maze_range.start}-{maze_range.stop}') # @param
+        data_dir = os.path.join(root_data_dir, f'worker{worker_idx}_e{eps:.1f}_maze{maze_range.start}-{maze_range.stop}') # @param
         p = Process(target=worker, args=(worker_idx, maze_seeds, eps, data_dir, split))
         p.start()
         processes.append(p)
@@ -168,9 +169,11 @@ if __name__ == "__main__":
         p.join()
 
   if TEST_DATALOADING:
-    multiple_dataset_path = os.path.join('./tensorflow_datasets/maze/')
+    multiple_dataset_path = os.path.join(root_data_dir)
     all_subdirs = get_ds_paths(multiple_dataset_path)
-    ds = tfds.builder_from_directories(all_subdirs).as_dataset(split='test')
+    builder = tfds.builder_from_directories(all_subdirs)
+    import ipdb; ipdb.set_trace()
+    ds = builder.as_dataset(split='test')
     ds = ds.take(5).cache().repeat(1)
     for i, e in enumerate(ds):
       print(i)
