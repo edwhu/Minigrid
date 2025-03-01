@@ -2,6 +2,11 @@
 *__pycache__
 *egg-info
 trained_models
+tensorflow_datasets
+tensorflow_datasets.zip
+maze.mp4
+maze.png
+policy_*.mp4
 
 # PyPI
 build/*
@@ -15,6 +20,8 @@ _site
 __pycache__
 .vscode/
 docs/_build/
+docs/build/
+_build/
 /docs/environments/**/*.md
 /docs/environments/**/*.html
 !/docs/environments/**/index.md
