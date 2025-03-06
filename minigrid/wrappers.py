@@ -8,7 +8,7 @@ import numpy as np
 from gymnasium import logger, spaces
 from gymnasium.core import ActionWrapper, ObservationWrapper, ObsType, Wrapper
 
-from minigrid.core.constants import COLOR_TO_IDX, OBJECT_TO_IDX, STATE_TO_IDX
+from minigrid.core.constants import COLOR_TO_IDX, OBJECT_TO_IDX, STATE_TO_IDX, TILE_PIXELS
 from minigrid.core.world_object import Goal
 
 
@@ -780,6 +780,200 @@ class SymbolicObsWrapper(ObservationWrapper):
         obs["image"] = grid
 
         return obs
+
+
+class ActiveVisionWrapper(ObservationWrapper):
+    """
+    Wrapper that adds a movable camera with partial observability to the environment.
+    The camera can move independently of the agent and only shows a partial view of the world.
+
+    The camera's view is highlighted in the human rendering mode.
+    Actions are split into two types:
+    - 'sensory': Controls camera movement (up, down, left, right)
+    - 'motor': Controls the agent's movement (original environment actions)
+    """
+    def __init__(self, env, camera_size=2):
+        """
+        Initialize the ActiveVisionWrapper.
+        
+        Args:
+            env: The environment to wrap
+            camera_size: Size of the camera view (camera_size x camera_size)
+        """
+        # First wrap with SymbolicObsWrapper to get full grid observation
+        env = SymbolicObsWrapper(env)
+        super().__init__(env)
+
+        self.camera_size = camera_size
+        # Get width from the unwrapped environment
+        self.grid_size = self.unwrapped.width
+
+        # Calculate camera position bounds to keep the view within the grid
+        self.min_cam_pos = (self.camera_size - 1) // 2
+        self.max_cam_pos = self.grid_size - self.min_cam_pos - 1
+
+        # Initialize camera position at center of grid, ensuring it's within valid bounds
+        center_pos = self.grid_size // 2
+        self.camera_pos = np.array([
+            min(max(center_pos, self.min_cam_pos), self.max_cam_pos),
+            min(max(center_pos, self.min_cam_pos), self.max_cam_pos)
+        ])
+
+        # Define sensory (camera) and motor (agent) action spaces
+        self.sensory_action_space = spaces.Discrete(4)  # up, down, left, right
+
+        # Create dictionary action space
+        self.action_space = spaces.Dict({
+            'sensory': self.sensory_action_space,
+            'motor': self.env.action_space
+        })
+
+        # Update observation space to include camera position
+        self.observation_space = spaces.Dict({
+            **self.env.observation_space.spaces,
+            'camera_pos': spaces.Box(
+                low=0,
+                high=self.grid_size-1,
+                shape=(2,),
+                dtype=np.int32
+            )
+        })
+
+        # Store original rendering methods
+        self.unwrapped._orig_get_frame = self.unwrapped.get_frame
+        self.unwrapped._orig_get_full_render = self.unwrapped.get_full_render
+
+        # Override rendering methods on the unwrapped environment
+        def get_frame_override(self_env, highlight=True, tile_size=TILE_PIXELS, agent_pov=False):
+            # Use original method but ensure our get_full_render_override is called
+            return self_env._orig_get_frame(highlight, tile_size, agent_pov)
+
+        def get_full_render_override(self_env, highlight, tile_size):
+            # Create highlight mask for camera view
+            highlight_mask = np.zeros(shape=(self_env.width, self_env.height), dtype=bool)
+            
+            # Calculate camera view boundaries
+            x_start, x_end, y_start, y_end = self._get_camera_view_boundaries(self_env.width, self_env.height)
+            
+            # Set the camera's view area to be highlighted
+            for x in range(x_start, x_end):
+                for y in range(y_start, y_end):
+                    highlight_mask[x, y] = True
+
+            # Render the grid with our highlight mask
+            return self_env.grid.render(
+                tile_size,
+                self_env.agent_pos,
+                self_env.agent_dir,
+                highlight_mask=highlight_mask if highlight else None
+            )
+
+        # Replace the methods on the unwrapped environment
+        self.unwrapped.get_frame = get_frame_override.__get__(self.unwrapped)
+        self.unwrapped.get_full_render = get_full_render_override.__get__(self.unwrapped)
+
+    def _get_camera_view_boundaries(self, width=None, height=None):
+        """
+        Calculate the camera view boundaries, ensuring they stay within the grid.
+        
+        Args:
+            width: Optional width to use instead of self.grid_size
+            height: Optional height to use instead of self.grid_size
+            
+        Returns:
+            Tuple of (x_start, x_end, y_start, y_end)
+        """
+        width = width or self.grid_size
+        height = height or self.grid_size
+        
+        # Calculate camera view boundaries
+        x_start = max(0, self.camera_pos[0] - (self.camera_size - 1) // 2)
+        x_end = min(width, x_start + self.camera_size)
+        y_start = max(0, self.camera_pos[1] - (self.camera_size - 1) // 2)
+        y_end = min(height, y_start + self.camera_size)
+        
+        return x_start, x_end, y_start, y_end
+
+    def step(self, action):
+        """
+        Handle both sensory (camera) and motor (agent) actions.
+
+        Args:
+            action: A dictionary with 'sensory' and 'motor' keys
+            
+        Returns:
+            Tuple of (observation, reward, terminated, truncated, info)
+        """
+        # Convert action values to integers if they're not already
+        # This handles both raw dictionaries and spaces.Dict sample results
+        sensory_action = int(action['sensory'])
+        motor_action = int(action['motor'])
+
+        # Process sensory action (camera movement)
+        new_pos = self.camera_pos.copy()
+
+        # Update camera position based on action
+        if sensory_action == 0:  # up
+            new_pos[1] -= 1
+        elif sensory_action == 1:  # down
+            new_pos[1] += 1
+        elif sensory_action == 2:  # left
+            new_pos[0] -= 1
+        elif sensory_action == 3:  # right
+            new_pos[0] += 1
+
+        # Ensure new position keeps camera view in bounds
+        new_pos[0] = min(max(new_pos[0], self.min_cam_pos), self.max_cam_pos)
+        new_pos[1] = min(max(new_pos[1], self.min_cam_pos), self.max_cam_pos)
+        self.camera_pos = new_pos
+
+        # Process motor action (agent movement)
+        obs, reward, terminated, truncated, info = self.env.step(motor_action)
+
+        return self.observation(obs), reward, terminated, truncated, info
+
+    def reset(self, **kwargs):
+        """
+        Reset both environment and camera position.
+        
+        Returns:
+            Tuple of (observation, info)
+        """
+        obs, info = self.env.reset(**kwargs)
+
+        # Reset camera to center, ensuring it's within valid bounds
+        center_pos = self.grid_size // 2
+        self.camera_pos = np.array([
+            min(max(center_pos, self.min_cam_pos), self.max_cam_pos),
+            min(max(center_pos, self.min_cam_pos), self.max_cam_pos)
+        ])
+
+        return self.observation(obs), info
+
+    def observation(self, obs):
+        """
+        Apply camera masking to the observation.
+        
+        Args:
+            obs: Original observation from the environment
+            
+        Returns:
+            Modified observation with masked image and camera position
+        """
+        image = obs['image']
+        masked_image = np.zeros_like(image)
+
+        # Calculate camera view boundaries
+        x_start, x_end, y_start, y_end = self._get_camera_view_boundaries()
+
+        # Only show the area within camera view
+        masked_image[y_start:y_end, x_start:x_end] = image[y_start:y_end, x_start:x_end]
+
+        return {
+            **obs,
+            'image': masked_image,
+            'camera_pos': self.camera_pos.copy()
+        }
 
 
 class StochasticActionWrapper(ActionWrapper):
